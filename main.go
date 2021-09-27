@@ -6,10 +6,16 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/miekg/dns"
+
 	"github.com/jessevdk/go-flags"
 )
 
 var logger *Logger
+
+var version string
+
+const name = "answer"
 
 func main() {
 	var opts struct {
@@ -22,10 +28,16 @@ func main() {
 		Port         string `long:"port" description:"The port number (TCP and UDP)" default:"53"`
 		ReadTimeout  string `long:"read-timeout" description:"The read timeout" default:"5s" hidden:"1"`
 		WriteTimeout string `long:"write-timeout" description:"The write timeout" default:"5s" hidden:"1"`
+		// Exchange
+		Exchange    bool     `long:"exchange" description:"Performs a synchronous query"`
+		NameServers []string `long:"server" description:"The name server"`
+		Resolv      string   `long:"resolv" description:"The resolv conf file" default:"/etc/resolv.conf" hidden:"1"`
+		// version
+		Version bool `long:"version" short:"v" description:"Show version"`
 	}
 
 	parser := flags.NewParser(&opts, flags.None)
-	parser.Name = "answer"
+	parser.Name = name
 	parser.LongDescription = `tiny DNS proxy`
 
 	_, err := parser.Parse()
@@ -38,6 +50,13 @@ func main() {
 
 	if opts.Help {
 		parser.WriteHelp(os.Stdout)
+		os.Exit(0)
+		return
+	}
+
+	if opts.Version {
+		fmt.Fprintln(os.Stdout, version)
+		os.Exit(0)
 		return
 	}
 
@@ -49,10 +68,19 @@ func main() {
 	}
 	logger.Info("boot up ...")
 
+	if opts.Exchange {
+		if config, err := dns.ClientConfigFromFile(opts.Resolv); err == nil && len(config.Servers) > 0 {
+			opts.NameServers = append(opts.NameServers, config.Servers...)
+		}
+	} else {
+		opts.NameServers = nil
+	}
+
 	servers, err := NewServers(opts.Host,
 		opts.Port,
 		opts.ReadTimeout,
-		opts.WriteTimeout)
+		opts.WriteTimeout,
+		opts.NameServers)
 	if err != nil {
 		logger.Error("failed to setup server %s", err.Error())
 		logger.Shutdown()

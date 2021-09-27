@@ -6,20 +6,54 @@ import (
 	"github.com/miekg/dns"
 )
 
-type Handler struct{}
+type Handler struct {
+	client    *dns.Client
+	addresses []string
+}
+
+func NewHandler(ns []string) *Handler {
+	h := &Handler{}
+	for _, n := range ns {
+		if _, _, err := net.SplitHostPort(n); err != nil {
+			n = net.JoinHostPort(n, "53")
+		}
+		h.addresses = append(h.addresses, n)
+	}
+	return h
+}
 
 func (h *Handler) TCP(w dns.ResponseWriter, req *dns.Msg) {
 	addr := w.RemoteAddr().(*net.TCPAddr)
 	logger.Info("%s (TCP) handle", addr)
 	logger.Debug("request\n%s", req)
-	w.WriteMsg(h.HandleRequest(req))
+	res := h.HandleRequest(req)
+	if len(res.Answer) == 0 && len(h.addresses) > 0 {
+		logger.Debug("no answer")
+		res = h.Exchange(req)
+	}
+
+	for _, a := range res.Answer {
+		logger.Info("answer %s", a.String())
+	}
+
+	w.WriteMsg(res)
 }
 
 func (h *Handler) UDP(w dns.ResponseWriter, req *dns.Msg) {
 	addr := w.RemoteAddr().(*net.UDPAddr)
 	logger.Info("%s (UDP) handle", addr)
 	logger.Debug("request\n%s", req)
-	w.WriteMsg(h.HandleRequest(req))
+	res := h.HandleRequest(req)
+	if len(res.Answer) == 0 && len(h.addresses) > 0 {
+		logger.Debug("no answer")
+		res = h.Exchange(req.SetEdns0(65535, true))
+	}
+
+	for _, a := range res.Answer {
+		logger.Info("answer %s", a.String())
+	}
+
+	w.WriteMsg(res)
 }
 
 func (h *Handler) HandleRequest(req *dns.Msg) *dns.Msg {
@@ -46,12 +80,12 @@ func (h *Handler) HandleRequest(req *dns.Msg) *dns.Msg {
 		name = name[:len(name)-1]
 	}
 
+	m := new(dns.Msg)
+	m.SetReply(req)
+
 	switch question.Qtype {
 	case dns.TypeA,
 		dns.TypeAAAA:
-		m := new(dns.Msg)
-		m.SetReply(req)
-
 		ips, err := net.LookupIP(name)
 		if err != nil {
 			logger.Notice("can not lookup ip %s", err.Error())
@@ -71,12 +105,7 @@ func (h *Handler) HandleRequest(req *dns.Msg) *dns.Msg {
 				})
 			}
 		}
-
-		return m
 	case dns.TypeCNAME:
-		m := new(dns.Msg)
-		m.SetReply(req)
-
 		cname, err := net.LookupCNAME(name)
 		if err != nil {
 			logger.Notice("can not lookup cname %s", err.Error())
@@ -87,12 +116,7 @@ func (h *Handler) HandleRequest(req *dns.Msg) *dns.Msg {
 			Hdr:    header,
 			Target: cname,
 		})
-
-		return m
 	case dns.TypeNS:
-		m := new(dns.Msg)
-		m.SetReply(req)
-
 		nss, err := net.LookupNS(name)
 		if err != nil {
 			logger.Notice("can not lookup ns %s", err.Error())
@@ -105,12 +129,7 @@ func (h *Handler) HandleRequest(req *dns.Msg) *dns.Msg {
 				Ns:  ns.Host,
 			})
 		}
-
-		return m
 	case dns.TypeMX:
-		m := new(dns.Msg)
-		m.SetReply(req)
-
 		mxs, err := net.LookupMX(name)
 		if err != nil {
 			logger.Notice("can not lookup mx %s", err.Error())
@@ -124,12 +143,7 @@ func (h *Handler) HandleRequest(req *dns.Msg) *dns.Msg {
 				Mx:         mx.Host,
 			})
 		}
-
-		return m
 	case dns.TypeTXT:
-		m := new(dns.Msg)
-		m.SetReply(req)
-
 		txt, err := net.LookupTXT(name)
 		if err != nil {
 			logger.Notice("can not lookup txt %s", err.Error())
@@ -140,8 +154,6 @@ func (h *Handler) HandleRequest(req *dns.Msg) *dns.Msg {
 			Hdr: header,
 			Txt: txt,
 		})
-
-		return m
 	case dns.TypePTR:
 		m := new(dns.Msg)
 		m.SetReply(req)
@@ -158,12 +170,32 @@ func (h *Handler) HandleRequest(req *dns.Msg) *dns.Msg {
 				Ptr: name,
 			})
 		}
-
-		return m
-	default:
-
-		return NotImplement(req)
 	}
+
+	return m
+}
+
+func (h *Handler) Exchange(req *dns.Msg) *dns.Msg {
+	for _, address := range h.addresses {
+		r, rtt, err := h.client.Exchange(req, address)
+		if err != nil {
+			logger.Warn("socket error on %s %v", address, err)
+			continue
+		}
+
+		if r != nil && r.Rcode != dns.RcodeSuccess {
+			logger.Warn("failed to get an valid answer on %s", address)
+			continue
+		}
+
+		logger.Info("resolve on %s rtt: %v", address, rtt)
+		return r
+	}
+
+	m := new(dns.Msg)
+	m.SetReply(req)
+
+	return m
 }
 
 func NotImplement(req *dns.Msg) *dns.Msg {

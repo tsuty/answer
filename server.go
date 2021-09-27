@@ -26,14 +26,14 @@ type Servers struct {
 	udp *Server
 }
 
-func NewServers(host, port, rt, wt string) (*Servers, error) {
-	tcp, err := NewNameServer(host, port, rt, wt)
+func NewServers(host, port, rt, wt string, ns []string) (*Servers, error) {
+	tcp, err := NewNameServer(host, port, rt, wt, ns)
 	if err != nil {
 		return nil, err
 	}
 	tcp.SetupTCPServer()
 
-	udp, err := NewNameServer(host, port, rt, wt)
+	udp, err := NewNameServer(host, port, rt, wt, ns)
 	if err != nil {
 		return nil, err
 	}
@@ -73,6 +73,12 @@ func (s *Server) SetupTCPServer() {
 		ReadTimeout:  s.readTimeout,
 		WriteTimeout: s.writeTimeout,
 	}
+
+	s.handler.client = &dns.Client{
+		Net:          TCP,
+		ReadTimeout:  s.readTimeout,
+		WriteTimeout: s.writeTimeout,
+	}
 }
 
 func (s *Server) SetupUDPServer() {
@@ -87,9 +93,15 @@ func (s *Server) SetupUDPServer() {
 		ReadTimeout:  s.readTimeout,
 		WriteTimeout: s.writeTimeout,
 	}
+
+	s.handler.client = &dns.Client{
+		Net:          UDP,
+		ReadTimeout:  s.readTimeout,
+		WriteTimeout: s.writeTimeout,
+	}
 }
 
-func NewNameServer(host, port, rt, wt string) (*Server, error) {
+func NewNameServer(host, port, rt, wt string, ns []string) (*Server, error) {
 	address := net.JoinHostPort(host, port)
 
 	rtd, err := time.ParseDuration(rt)
@@ -105,18 +117,21 @@ func NewNameServer(host, port, rt, wt string) (*Server, error) {
 		address:      address,
 		readTimeout:  rtd,
 		writeTimeout: wtd,
+		handler:      NewHandler(ns),
 	}, nil
 }
 
 func (s *Server) Start() {
 	if s.internal == nil {
-		logger.Error("server not initialized")
-		panic("can not start server")
+		msg := "can not start server. server not initialized"
+		logger.Error(msg)
+		panic(msg)
 	}
 
 	logger.Info("listen and serve %s", s.internal.Net)
 	if err := s.internal.ListenAndServe(); err != nil {
-		logger.Error("%s server (%s)", s.internal.Net, err.Error())
-		panic("can not start server")
+		msg := fmt.Sprintf("can not start server. %s server (%s)", s.internal.Net, err.Error())
+		logger.Error(msg)
+		panic(msg)
 	}
 }
