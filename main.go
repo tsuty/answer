@@ -6,9 +6,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/miekg/dns"
-
 	"github.com/jessevdk/go-flags"
+	"github.com/miekg/dns"
 )
 
 var logger *Logger
@@ -21,7 +20,7 @@ func main() {
 	var opts struct {
 		Help bool `short:"h" long:"help" description:"Show this help message"`
 		// log
-		LogFile  string `long:"log" description:"The log file path (default stdout)"`
+		LogFile  string `long:"log" description:"The log file path or stdout|stderr|none (default stdout)"`
 		Loglevel string `long:"level" description:"The log level" choice:"debug" choice:"info" choice:"notice" choice:"warn" choice:"error" default:"debug"`
 		// dns
 		Host         string `long:"host" description:"The host name" default:"127.0.0.1"`

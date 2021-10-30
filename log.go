@@ -46,6 +46,7 @@ func (l LogLevel) String() string {
 const (
 	LogOutputStdout = "stdout"
 	LogOutputStdErr = "stderr"
+	LogOutputNone   = "none"
 )
 
 type nullWriter struct{}
@@ -69,8 +70,12 @@ func NewLogger(file, level string) (*Logger, error) {
 
 	var w io.Writer
 	switch file {
-	case "":
+	case LogOutputStdout, "":
 		w = os.Stdout
+	case LogOutputStdErr:
+		w = os.Stderr
+	case LogOutputNone:
+		w = &nullWriter{}
 	default:
 		var err error
 		if w, err = os.OpenFile(file, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666); err != nil {
